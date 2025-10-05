@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')  # Backend sin interfaz gráfica
 import matplotlib.pyplot as plt
 from datetime import datetime
+import json
 
 # --- 1. Configuración Inicial y Carga de Artefactos ---
 app = Flask(__name__)
@@ -121,15 +122,21 @@ def analyze_star(star_id):
     # Verificar si ya existe una imagen para este ID
     existing_filename = f"kic_{star_id}.png"
     existing_filepath = os.path.join(IMAGES_FOLDER, existing_filename)
+    metadata_filepath = os.path.join(IMAGES_FOLDER, f"kic_{star_id}_metadata.json")
 
-    if os.path.exists(existing_filepath):
+    if os.path.exists(existing_filepath) and os.path.exists(metadata_filepath):
         print(f"♻️  Imagen ya existe para KIC {star_id}, reutilizando...")
         image_url = url_for('static', filename=f'images/{existing_filename}', _external=True)
+
+        # Cargar parámetros guardados
+        with open(metadata_filepath, 'r') as f:
+            metadata = json.load(f)
 
         return jsonify({
             "image_url": image_url,
             "message": "Imagen existente recuperada (no se regeneró)",
             "star_id": f"KIC {star_id}",
+            "parameters": metadata.get("parameters", {}),
             "cached": True
         }), 200
 
@@ -190,7 +197,23 @@ def analyze_star(star_id):
         plt.savefig(existing_filepath, dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # 9. Generar URL de la imagen
+        # 9. Guardar metadatos en JSON
+        parameters = {
+            "period": float(planet_x_period.value),
+            "transit_time": float(planet_x_t0.value),
+            "duration": float(planet_x_dur.value)
+        }
+
+        metadata = {
+            "star_id": f"KIC {star_id}",
+            "parameters": parameters,
+            "generated_at": datetime.now().isoformat()
+        }
+
+        with open(metadata_filepath, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        # 10. Generar URL de la imagen
         image_url = url_for('static', filename=f'images/{existing_filename}', _external=True)
 
         print(f"✅ Imagen generada exitosamente: {existing_filename}")
@@ -199,11 +222,7 @@ def analyze_star(star_id):
             "image_url": image_url,
             "message": "Análisis completado exitosamente",
             "star_id": f"KIC {star_id}",
-            "parameters": {
-                "period": float(planet_x_period.value),
-                "transit_time": float(planet_x_t0.value),
-                "duration": float(planet_x_dur.value)
-            },
+            "parameters": parameters,
             "cached": False
         }), 200
 
