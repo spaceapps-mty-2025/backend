@@ -1,3 +1,5 @@
+# app.py (Versión Ajustada)
+
 from flask import Flask, request, jsonify
 import pandas as pd
 import joblib
@@ -7,8 +9,6 @@ from functools import wraps
 # --- 1. Configuración Inicial y Carga de Artefactos ---
 app = Flask(__name__)
 
-# Lee la API Key desde una variable de entorno para seguridad.
-# Le pondremos un valor por defecto solo para pruebas locales.
 API_KEY = os.environ.get('API_KEY', 'WXviSp$hK8')
 
 try:
@@ -32,20 +32,24 @@ def require_api_key(f):
     return decorated_function
 
 # --- 2. Definición del "Contrato" de la API ---
+
+# ¡CAMBIO! 'ra' y 'dec' ya no son obligatorios. La lista se reduce a 9 campos.
 MANDATORY_FEATURES = [
     'period', 'duration', 'transit_depth', 'planet_radius', 'eq_temp', 'insol_flux',
-    'stellar_eff_temp', 'stellar_logg', 'stellar_radius', 'ra', 'dec'
+    'stellar_eff_temp', 'stellar_logg', 'stellar_radius'
 ]
+
+# ¡CAMBIO! Se eliminan las columnas que ya no forman parte del modelo.
 FINAL_COLUMN_ORDER = [
     'koi_fpflag_nt', 'koi_fpflag_ss', 'koi_fpflag_co', 'koi_fpflag_ec', 'period',
     'koi_time0bk', 'koi_impact', 'duration', 'transit_depth', 'planet_radius',
-    'eq_temp', 'insol_flux', 'koi_model_snr', 'koi_tce_plnt_num', 'stellar_eff_temp',
+    'eq_temp', 'insol_flux', 'koi_model_snr', 'stellar_eff_temp',
     'stellar_logg', 'stellar_radius', 'ra', 'dec', 'koi_kepmag',
-    'st_pmra', 'st_pmdec', 'transit_midpoint', 'tess_mag', 'stellar_dist',
+    'transit_midpoint', 'tess_mag', 'stellar_dist',
     'snr_per_srad', 'depth_per_srad_sq'
 ]
 
-# --- 3. API Endpoint para Predicciones (ahora protegido) ---
+# --- 3. API Endpoint para Predicciones ---
 @app.route('/predict', methods=['POST'])
 @require_api_key  # <-- ¡Aquí aplicamos la seguridad!
 def predict():
@@ -93,8 +97,7 @@ def predict():
     except Exception as e:
         return jsonify({"error": f"Error durante la predicción: {str(e)}"}), 500
 
-# --- 4. Iniciar el Servidor (Solo para pruebas locales) ---
-# El proveedor cloud usará un servidor de producción (Gunicorn), no este.
+# --- 4. Iniciar el Servidor ---
 if __name__ == '__main__':
     print("🚀 Iniciando servidor de predicción en http://127.0.0.1:5000")
-    app.run(port=5000, debug=True)
+    app.run(port=5000, debug=False)

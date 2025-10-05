@@ -1,4 +1,4 @@
-# SCRIPT FINAL-FINAL PARA KAGGLE (ENTRENAR Y GUARDAR)
+# SCRIPT DE ENTRENAMIENTO FINAL (AJUSTADO)
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -12,7 +12,6 @@ koi_df = pd.read_csv('/kaggle/input/koi-dataset/cumulative_2025.10.04_15.09.17.c
 tess_df = pd.read_csv('/kaggle/input/tess-dataset/TOI_2025.10.04_20.11.03.csv', skiprows=27)
 
 # --- PASO 2: Estandarización y Unión ---
-# ... (la sección de mapeo de columnas y target es idéntica a la anterior)
 koi_map = {
     'koi_period': 'period', 'koi_duration': 'duration', 'koi_depth': 'transit_depth',
     'koi_prad': 'planet_radius', 'koi_teq': 'eq_temp', 'koi_insol': 'insol_flux',
@@ -35,17 +34,19 @@ tess_df['disposition'] = tess_df['tfopwg_disp'].map({'CP': 0, 'PC': 1})
 combined_df = pd.concat([koi_df, tess_df], ignore_index=True, sort=False)
 
 # --- ¡CAMBIO IMPORTANTE AQUÍ! ---
-# Se eliminan TODAS las columnas no deseadas del DataFrame combinado
+# Se añaden las nuevas columnas a la lista de eliminación.
 cols_to_drop_final = [
     'kepid', 'koi_score', 'kepoi_name', 'kepler_name', 'koi_disposition',
     'koi_pdisposition', 'tfopwg_disp', 'rowid', 'koi_teq_err1', 'koi_teq_err2',
-    'tid', 'toi' # IDs de TESS que tampoco son características
+    'tid', 'toi',
+    'koi_tce_plnt_num', # <--- ELIMINADO
+    'st_pmra',          # <--- ELIMINADO
+    'st_pmdec'          # <--- ELIMINADO
 ]
-# Eliminamos solo las que existen para evitar errores
 existing_cols_to_drop = [col for col in cols_to_drop_final if col in combined_df.columns]
 combined_df.drop(columns=existing_cols_to_drop, inplace=True)
 
-# --- El resto del script continúa ---
+# --- El resto del script continúa sin cambios ---
 combined_df['snr_per_srad'] = combined_df['koi_model_snr'] / combined_df['stellar_radius']
 combined_df['depth_per_srad_sq'] = combined_df['transit_depth'] / (combined_df['stellar_radius'] ** 2)
 
