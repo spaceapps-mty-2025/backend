@@ -1,4 +1,4 @@
-# app.py (Versión Ajustada)
+# app.py (Versión Final, Sincronizada y Robusta)
 
 from flask import Flask, request, jsonify
 import pandas as pd
@@ -8,23 +8,28 @@ from functools import wraps
 
 # --- 1. Configuración Inicial y Carga de Artefactos ---
 app = Flask(__name__)
-
-API_KEY = os.environ.get('API_KEY', 'WXviSp$hK8')
+API_KEY = os.environ.get('API_KEY', 'WXviSp$hK8') # Clave por defecto
 
 try:
     model = joblib.load('exoplanet_model.joblib')
     scaler = joblib.load('data_scaler.joblib')
     feature_means = joblib.load('feature_means.joblib')
-    print("✅ Modelo, escalador y promedios de características cargados correctamente.")
-except FileNotFoundError:
-    print("❌ Error: Asegúrate de que los 3 archivos .joblib estén en la misma carpeta.")
-    model, scaler, feature_means = None, None, None
+    
+    # ¡MEJORA CLAVE! El orden de las columnas se define automáticamente desde el artefacto.
+    # Esto garantiza una sincronización perfecta con el modelo entrenado.
+    FINAL_COLUMN_ORDER = list(feature_means.keys())
+    
+    print("✅ Modelo, escalador y promedios cargados correctamente.")
+    print(f"✅ El modelo espera {len(FINAL_COLUMN_ORDER)} características.")
 
-# --- Decorador para requerir la API Key ---
+except FileNotFoundError:
+    print("❌ Error: No se encontraron los archivos .joblib. Asegúrate de que estén en la misma carpeta.")
+    model, scaler, feature_means, FINAL_COLUMN_ORDER = None, None, None, []
+
+# --- Decorador para la API Key ---
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Buscamos la clave en la cabecera 'X-API-Key'
         if request.headers.get('X-API-Key') and request.headers.get('X-API-Key') == API_KEY:
             return f(*args, **kwargs)
         else:
@@ -32,26 +37,14 @@ def require_api_key(f):
     return decorated_function
 
 # --- 2. Definición del "Contrato" de la API ---
-
-# ¡CAMBIO! 'ra' y 'dec' ya no son obligatorios. La lista se reduce a 9 campos.
 MANDATORY_FEATURES = [
     'period', 'duration', 'transit_depth', 'planet_radius', 'eq_temp', 'insol_flux',
     'stellar_eff_temp', 'stellar_logg', 'stellar_radius'
 ]
 
-# ¡CAMBIO! Se eliminan las columnas que ya no forman parte del modelo.
-FINAL_COLUMN_ORDER = [
-    'koi_fpflag_nt', 'koi_fpflag_ss', 'koi_fpflag_co', 'koi_fpflag_ec', 'period',
-    'koi_time0bk', 'koi_impact', 'duration', 'transit_depth', 'planet_radius',
-    'eq_temp', 'insol_flux', 'koi_model_snr', 'stellar_eff_temp',
-    'stellar_logg', 'stellar_radius', 'ra', 'dec', 'koi_kepmag',
-    'transit_midpoint', 'tess_mag', 'stellar_dist',
-    'snr_per_srad', 'depth_per_srad_sq'
-]
-
 # --- 3. API Endpoint para Predicciones ---
 @app.route('/predict', methods=['POST'])
-@require_api_key  # <-- ¡Aquí aplicamos la seguridad!
+@require_api_key
 def predict():
     if not all([model, scaler, feature_means]):
         return jsonify({"error": "El modelo no está disponible. Revisa los logs del servidor."}), 500
@@ -66,13 +59,17 @@ def predict():
 
     try:
         df = pd.DataFrame([data])
+        
+        # Rellenar campos opcionales faltantes con los promedios del entrenamiento
         for col in FINAL_COLUMN_ORDER:
             if col not in df.columns:
                 df[col] = feature_means.get(col, 0)
 
+        # Re-crear las características de ingeniería
         df['snr_per_srad'] = df['koi_model_snr'] / df['stellar_radius']
         df['depth_per_srad_sq'] = df['transit_depth'] / (df['stellar_radius'] ** 2)
         
+        # Asegurar el orden final de las columnas
         df = df[FINAL_COLUMN_ORDER]
         
         data_scaled = scaler.transform(df)
