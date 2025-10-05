@@ -1,14 +1,25 @@
 # app.py (Versión Final, Sincronizada y Robusta)
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, url_for
 import pandas as pd
 import joblib
 import os
 from functools import wraps
+import lightkurve as lk
+from lightkurve import search_targetpixelfile
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Backend sin interfaz gráfica
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 # --- 1. Configuración Inicial y Carga de Artefactos ---
 app = Flask(__name__)
 API_KEY = os.environ.get('API_KEY', 'WXviSp$hK8') # Clave por defecto
+
+# Crear carpeta para imágenes si no existe
+IMAGES_FOLDER = 'static/images'
+os.makedirs(IMAGES_FOLDER, exist_ok=True)
 
 try:
     model = joblib.load('exoplanet_model.joblib')
@@ -93,6 +104,122 @@ def predict():
 
     except Exception as e:
         return jsonify({"error": f"Error durante la predicción: {str(e)}"}), 500
+
+# --- 3.2. API Endpoint para Análisis de Estrellas y Generación de Imágenes ---
+@app.route('/analyze-star/<star_id>', methods=['GET'])
+@require_api_key
+def analyze_star(star_id):
+    """
+    Analiza una estrella por su ID (ej: 6922244 para KIC 6922244)
+    y genera un gráfico de la curva de luz plegada.
+    Si ya existe una imagen para este ID, la devuelve sin regenerar.
+    """
+
+    if not star_id or not star_id.strip():
+        return jsonify({"image_url": None, "message": "ID de estrella vacío"}), 400
+
+    # Verificar si ya existe una imagen para este ID
+    existing_filename = f"kic_{star_id}.png"
+    existing_filepath = os.path.join(IMAGES_FOLDER, existing_filename)
+
+    if os.path.exists(existing_filepath):
+        print(f"♻️  Imagen ya existe para KIC {star_id}, reutilizando...")
+        image_url = url_for('static', filename=f'images/{existing_filename}', _external=True)
+
+        return jsonify({
+            "image_url": image_url,
+            "message": "Imagen existente recuperada (no se regeneró)",
+            "star_id": f"KIC {star_id}",
+            "cached": True
+        }), 200
+
+    try:
+        # 1. Buscar el archivo de píxeles
+        print(f"🔍 Buscando datos para KIC {star_id}...")
+        search_result = search_targetpixelfile(
+            f'KIC {star_id}',
+            author="Kepler",
+            cadence="long",
+            quarter=4
+        )
+
+        if len(search_result) == 0:
+            return jsonify({
+                "image_url": None,
+                "message": f"No se encontraron datos para KIC {star_id}"
+            }), 404
+
+        # 2. Descargar el archivo de píxeles
+        print(f"📥 Descargando datos...")
+        pixelFile = search_result.download()
+
+        if pixelFile is None:
+            return jsonify({
+                "image_url": None,
+                "message": "Error al descargar datos de la estrella"
+            }), 500
+
+        # 3. Convertir a curva de luz
+        print(f"📊 Generando curva de luz...")
+        lc = pixelFile.to_lightcurve(aperture_mask=pixelFile.pipeline_mask)
+
+        # 4. Aplanar la curva
+        flat_lc = lc.flatten()
+
+        # 5. Generar periodograma BLS
+        print(f"🔬 Analizando periodicidad...")
+        period = np.linspace(1, 5, 20)
+        bls = lc.to_periodogram(method='bls', period=period, frequency_factor=500)
+
+        # 6. Extraer parámetros del planeta
+        planet_x_period = bls.period_at_max_power
+        planet_x_t0 = bls.transit_time_at_max_power
+        planet_x_dur = bls.duration_at_max_power
+
+        # 7. Generar la imagen final (curva de luz plegada)
+        print(f"🎨 Generando imagen...")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        lc.fold(period=planet_x_period, epoch_time=planet_x_t0).scatter(ax=ax)
+        ax.set_xlim(-2, 2)
+        ax.set_title(f'Curva de Luz Plegada - KIC {star_id}')
+        ax.set_xlabel('Tiempo desde tránsito [días]')
+        ax.set_ylabel('Flujo normalizado')
+
+        # 8. Guardar la imagen (sin timestamp para evitar duplicados)
+        plt.tight_layout()
+        plt.savefig(existing_filepath, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+        # 9. Generar URL de la imagen
+        image_url = url_for('static', filename=f'images/{existing_filename}', _external=True)
+
+        print(f"✅ Imagen generada exitosamente: {existing_filename}")
+
+        return jsonify({
+            "image_url": image_url,
+            "message": "Análisis completado exitosamente",
+            "star_id": f"KIC {star_id}",
+            "parameters": {
+                "period": float(planet_x_period.value),
+                "transit_time": float(planet_x_t0.value),
+                "duration": float(planet_x_dur.value)
+            },
+            "cached": False
+        }), 200
+
+    except ValueError as ve:
+        print(f"❌ Error de validación: {str(ve)}")
+        return jsonify({
+            "image_url": None,
+            "message": f"ID de estrella inválido: {str(ve)}"
+        }), 400
+
+    except Exception as e:
+        print(f"❌ Error durante el análisis: {str(e)}")
+        return jsonify({
+            "image_url": None,
+            "message": "Error al procesar la estrella. Verifica que el ID sea válido."
+        }), 500
 
 # --- 4. Iniciar el Servidor ---
 if __name__ == '__main__':
